@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "690914403970",
+    "project_id": "mindmend-86949",
+    "storage_bucket": "mindmend-86949.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:690914403970:android:53f0f21d3c386fd515369b",
+        "android_client_info": {
+          "package_name": "com.example.mindmend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCPT8tvU-eRWlsiml8eqautNhbKdBgv9Jw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
