@@ -1,28 +1,30 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'dart:convert';
 import 'dart:math';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: '.env');
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
   runApp(const MindMendApp());
 }
 
-const String geminiApiKey = 'AIzaSyC8oKKYaZE6eG31qNSPDrZiUs2NvUHyTJA';
-const String geminiUrl =
-    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=$geminiApiKey';
+String get geminiApiKey => dotenv.env['GEMINI_KEY'] ?? '';
+String get geminiUrl =>
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$geminiApiKey';
 
 const List<String> crisisKeywords = [
   'suicide', 'kill myself', 'end my life', 'want to die',
-  'can\'t take it anymore', 'no reason to live', 'disappear forever',
+  'cant take it anymore', 'no reason to live', 'disappear forever',
   'everyone would be better without me', 'i give up on life',
 ];
 
@@ -33,7 +35,6 @@ bool detectCrisis(String message) {
 
 class MindMendApp extends StatelessWidget {
   const MindMendApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -77,10 +78,8 @@ class _SplashScreenState extends State<SplashScreen> {
             SizedBox(height: 24),
             Text('MindMend',
                 style: TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 2)),
+                    fontSize: 36, fontWeight: FontWeight.bold,
+                    color: Colors.white, letterSpacing: 2)),
             SizedBox(height: 12),
             Text('Say everything you couldn\'t say',
                 style: TextStyle(fontSize: 16, color: Colors.white70)),
@@ -90,6 +89,7 @@ class _SplashScreenState extends State<SplashScreen> {
     );
   }
 }
+
 // ── ONBOARDING ──
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -113,33 +113,38 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   void initState() {
     super.initState();
+    _username = '';
     _loadOrGenerateUsername();
   }
+Future<void> _loadOrGenerateUsername() async {
+  // Check local storage for existing user ID
+  final prefs = await SharedPreferences.getInstance();
+  final savedUid = prefs.getString('user_uid');
 
-  Future<void> _loadOrGenerateUsername() async {
-    User? currentUser = FirebaseAuth.instance.currentUser;
+  User? currentUser = FirebaseAuth.instance.currentUser;
 
-    if (currentUser != null) {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .get();
-
-      if (doc.exists && doc.data()!.containsKey('username')) {
-        if (mounted) {
-          Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                  builder: (_) =>
-                      HomeScreen(username: doc.data()!['username'])));
-        }
-        return;
-      }
-    }
-
-    _generateUsername();
-    setState(() => _loading = false);
+  if (savedUid != null && currentUser == null) {
+    // Sign in anonymously but check Firestore for saved data
+    await FirebaseAuth.instance.signInAnonymously();
+    currentUser = FirebaseAuth.instance.currentUser;
   }
+
+  if (currentUser != null) {
+    final doc = await FirebaseFirestore.instance
+        .collection('users').doc(currentUser.uid).get();
+    if (doc.exists && doc.data()!.containsKey('username')) {
+      await prefs.setString('user_uid', currentUser.uid);
+      if (mounted) {
+        Navigator.pushReplacement(context,
+            MaterialPageRoute(builder: (_) => HomeScreen(username: doc.data()!['username'])));
+      }
+      return;
+    }
+  }
+
+  _generateUsername();
+  setState(() => _loading = false);
+}
 
   void _generateUsername() {
     final rand = Random();
@@ -149,21 +154,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _username = '${adj}_${noun}_$num';
   }
 
-  void _regenerate() {
-    setState(() => _generateUsername());
-  }
+  void _regenerate() => setState(() => _generateUsername());
 
   @override
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(
         backgroundColor: Color(0xFF7C6FF7),
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
       );
     }
-
     return Scaffold(
       backgroundColor: const Color(0xFF7C6FF7),
       body: SafeArea(
@@ -176,16 +176,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               const SizedBox(height: 24),
               const Text('You are completely anonymous',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
               const SizedBox(height: 12),
-              const Text(
-                  'No name. No photo. No judgment.\nThis is your safe space.',
+              const Text('No name. No photo. No judgment.\nThis is your safe space.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 15, color: Colors.white70, height: 1.6)),
+                  style: TextStyle(fontSize: 15, color: Colors.white70, height: 1.6)),
               const SizedBox(height: 48),
               Container(
                 width: double.infinity,
@@ -201,19 +196,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         style: TextStyle(color: Colors.white70, fontSize: 13)),
                     const SizedBox(height: 12),
                     Text(_username,
-                        style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            letterSpacing: 1)),
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold,
+                            color: Colors.white, letterSpacing: 1)),
                     const SizedBox(height: 16),
                     TextButton.icon(
                       onPressed: _regenerate,
-                      icon: const Icon(Icons.refresh,
-                          color: Colors.white70, size: 18),
+                      icon: const Icon(Icons.refresh, color: Colors.white70, size: 18),
                       label: const Text('Generate new name',
-                          style: TextStyle(
-                              color: Colors.white70, fontSize: 13)),
+                          style: TextStyle(color: Colors.white70, fontSize: 13)),
                     ),
                   ],
                 ),
@@ -228,8 +218,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 child: const Text(
                   '🔒  We will never ask your real name, phone number, or college. Ever.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Colors.white70, fontSize: 13, height: 1.5),
+                  style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
                 ),
               ),
               const SizedBox(height: 40),
@@ -237,20 +226,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 width: double.infinity,
                 height: 54,
                 child: ElevatedButton(
-                  onPressed: () => Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => HomeScreen(username: _username))),
+                  onPressed: () => Navigator.pushReplacement(context,
+                      MaterialPageRoute(builder: (_) => HomeScreen(username: _username))),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
                   child: const Text('Enter MindMend',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF7C6FF7))),
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF7C6FF7))),
                 ),
               ),
             ],
@@ -260,10 +243,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
   }
 }
+
 // ── TREE WIDGET ──
 class GrowingTree extends StatelessWidget {
   final int streak;
-
   const GrowingTree({super.key, required this.streak});
 
   String get _stageLabel {
@@ -287,13 +270,10 @@ class GrowingTree extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            const Color(0xFFE8F5E9),
-            const Color(0xFFF1F8E9),
-          ],
+          colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
         ),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: const Color(0xFFA5D6A7), width: 1),
@@ -304,53 +284,37 @@ class GrowingTree extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('Your Tree',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF2D2D2D))),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF2D2D2D))),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: const Color(0xFF4CAF50).withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text('$streak day streak 🔥',
-                    style: const TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF2E7D32),
-                        fontWeight: FontWeight.w600)),
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF2E7D32), fontWeight: FontWeight.w600)),
               ),
             ],
           ),
           const SizedBox(height: 16),
           SizedBox(
             height: 160,
-            child: CustomPaint(
-              painter: TreePainter(streak: streak),
-              size: const Size(double.infinity, 160),
-            ),
+            child: CustomPaint(painter: TreePainter(streak: streak), size: const Size(double.infinity, 160)),
           ),
           const SizedBox(height: 12),
-          Text(_stageLabel,
-              style: TextStyle(
-                  fontSize: 13,
-                  color: _groundColor,
-                  fontWeight: FontWeight.w600)),
+          Text(_stageLabel, style: TextStyle(fontSize: 13, color: _groundColor, fontWeight: FontWeight.w600)),
           if (streak > 0) ...[
             const SizedBox(height: 8),
             LinearProgressIndicator(
               value: (streak % 7) / 7,
               backgroundColor: Colors.grey.withOpacity(0.2),
-              valueColor:
-                  AlwaysStoppedAnimation<Color>(_groundColor),
+              valueColor: AlwaysStoppedAnimation<Color>(_groundColor),
               borderRadius: BorderRadius.circular(10),
               minHeight: 6,
             ),
             const SizedBox(height: 4),
             Text('${7 - (streak % 7)} days to next stage',
-                style:
-                    const TextStyle(fontSize: 11, color: Colors.grey)),
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ],
         ],
       ),
@@ -360,100 +324,54 @@ class GrowingTree extends StatelessWidget {
 
 class TreePainter extends CustomPainter {
   final int streak;
-
   TreePainter({required this.streak});
 
   @override
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
-
-    // Ground
     final groundPaint = Paint()
       ..color = const Color(0xFF8B6914).withOpacity(0.3)
       ..style = PaintingStyle.fill;
     canvas.drawOval(
-        Rect.fromCenter(
-            center: Offset(cx, size.height - 10),
-            width: 80,
-            height: 16),
-        groundPaint);
+        Rect.fromCenter(center: Offset(cx, size.height - 10), width: 80, height: 16), groundPaint);
 
     if (streak <= 0) {
-      // Just a seed
-      final seedPaint = Paint()
-        ..color = const Color(0xFF8B6914)
-        ..style = PaintingStyle.fill;
+      final seedPaint = Paint()..color = const Color(0xFF8B6914)..style = PaintingStyle.fill;
       canvas.drawCircle(Offset(cx, size.height - 18), 6, seedPaint);
       return;
     }
 
-    // Trunk
-    final trunkHeight = streak <= 7
-        ? 40.0
-        : streak <= 14
-            ? 60.0
-            : streak <= 21
-                ? 75.0
-                : 85.0;
+    final trunkHeight = streak <= 7 ? 40.0 : streak <= 14 ? 60.0 : streak <= 21 ? 75.0 : 85.0;
     final trunkWidth = streak <= 7 ? 6.0 : streak <= 14 ? 9.0 : 12.0;
-
     final trunkPaint = Paint()
       ..color = const Color(0xFF795548)
       ..style = PaintingStyle.stroke
       ..strokeWidth = trunkWidth
       ..strokeCap = StrokeCap.round;
-
-    canvas.drawLine(
-        Offset(cx, size.height - 15),
-        Offset(cx, size.height - 15 - trunkHeight),
-        trunkPaint);
-
+    canvas.drawLine(Offset(cx, size.height - 15), Offset(cx, size.height - 15 - trunkHeight), trunkPaint);
     final trunkBase = Offset(cx, size.height - 15 - trunkHeight);
-
-    // Leaves based on streak
-    final leafCount = streak.clamp(1, 30);
-    _drawLeaves(canvas, trunkBase, leafCount, size);
-
-    // Flowers for day 15+
-    if (streak >= 15) {
-      _drawFlowers(canvas, trunkBase, streak);
-    }
+    _drawLeaves(canvas, trunkBase, streak.clamp(1, 30), size);
+    if (streak >= 15) _drawFlowers(canvas, trunkBase, streak);
   }
 
-  void _drawLeaves(
-      Canvas canvas, Offset base, int count, Size size) {
-    final rand = Random(42); // fixed seed for consistent positions
-
+  void _drawLeaves(Canvas canvas, Offset base, int count, Size size) {
+    final rand = Random(42);
     final leafColors = [
-      const Color(0xFF4CAF50),
-      const Color(0xFF66BB6A),
-      const Color(0xFF81C784),
-      const Color(0xFF388E3C),
-      const Color(0xFF2E7D32),
+      const Color(0xFF4CAF50), const Color(0xFF66BB6A), const Color(0xFF81C784),
+      const Color(0xFF388E3C), const Color(0xFF2E7D32),
     ];
-
     final leafPaint = Paint()..style = PaintingStyle.fill;
-
     for (int i = 0; i < count; i++) {
       final angle = rand.nextDouble() * 2 * pi;
       final radius = 20.0 + rand.nextDouble() * 35;
       final x = base.dx + cos(angle) * radius;
       final y = base.dy + sin(angle) * radius * 0.7 - 10;
       final leafSize = 8.0 + rand.nextDouble() * 10;
-
-      leafPaint.color =
-          leafColors[rand.nextInt(leafColors.length)].withOpacity(0.85);
-
-      // Draw leaf as oval
+      leafPaint.color = leafColors[rand.nextInt(leafColors.length)].withOpacity(0.85);
       canvas.save();
       canvas.translate(x, y);
       canvas.rotate(angle);
-      canvas.drawOval(
-          Rect.fromCenter(
-              center: Offset.zero,
-              width: leafSize,
-              height: leafSize * 1.4),
-          leafPaint);
+      canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: leafSize, height: leafSize * 1.4), leafPaint);
       canvas.restore();
     }
   }
@@ -461,39 +379,25 @@ class TreePainter extends CustomPainter {
   void _drawFlowers(Canvas canvas, Offset base, int streak) {
     final rand = Random(99);
     final flowerCount = ((streak - 14) * 1.5).toInt().clamp(1, 12);
-
-    final petalPaint = Paint()
-      ..color = const Color(0xFFFF80AB)
-      ..style = PaintingStyle.fill;
-    final centerPaint = Paint()
-      ..color = const Color(0xFFFFEB3B)
-      ..style = PaintingStyle.fill;
-
+    final petalPaint = Paint()..color = const Color(0xFFFF80AB)..style = PaintingStyle.fill;
+    final centerPaint = Paint()..color = const Color(0xFFFFEB3B)..style = PaintingStyle.fill;
     for (int i = 0; i < flowerCount; i++) {
       final angle = rand.nextDouble() * 2 * pi;
       final radius = 15.0 + rand.nextDouble() * 30;
       final x = base.dx + cos(angle) * radius;
       final y = base.dy + sin(angle) * radius * 0.7 - 5;
-
-      // Petals
       for (int p = 0; p < 5; p++) {
         final pAngle = p * 2 * pi / 5;
-        canvas.drawCircle(
-            Offset(x + cos(pAngle) * 5, y + sin(pAngle) * 5),
-            4,
-            petalPaint);
+        canvas.drawCircle(Offset(x + cos(pAngle) * 5, y + sin(pAngle) * 5), 4, petalPaint);
       }
-      // Center
       canvas.drawCircle(Offset(x, y), 3, centerPaint);
     }
   }
 
   @override
-  bool shouldRepaint(TreePainter oldDelegate) =>
-      oldDelegate.streak != streak;
+  bool shouldRepaint(TreePainter oldDelegate) => oldDelegate.streak != streak;
 }
 
-// ── HOME ──
 // ── HOME ──
 class HomeScreen extends StatefulWidget {
   final String username;
@@ -522,23 +426,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initUser() async {
-    // Sign in anonymously
-    UserCredential userCredential =
-        await FirebaseAuth.instance.signInAnonymously();
+    UserCredential userCredential = await FirebaseAuth.instance.signInAnonymously();
     _uid = userCredential.user!.uid;
 
-    // Load streak from Firestore
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(_uid)
-        .get();
-
+    final doc = await FirebaseFirestore.instance.collection('users').doc(_uid).get();
     final today = DateTime.now().toIso8601String().substring(0, 10);
     int currentStreak = 0;
     String message = '';
 
     if (!doc.exists) {
-      // First time user
       currentStreak = 1;
       message = '🌱 Welcome! Your tree is planted. Come back tomorrow to grow it!';
       await FirebaseFirestore.instance.collection('users').doc(_uid).set({
@@ -551,27 +447,20 @@ class _HomeScreenState extends State<HomeScreen> {
       final data = doc.data()!;
       currentStreak = data['streak'] ?? 0;
       final lastOpen = data['last_open_date'] ?? '';
-
       if (lastOpen == today) {
-        // Already opened today — just load streak
+        // already opened today
       } else {
         final last = DateTime.parse(lastOpen);
         final diff = DateTime.now().difference(last).inDays;
-
         if (diff == 1) {
           currentStreak += 1;
           message = _getMilestoneMessage(currentStreak);
         } else {
           final lostLeaves = (diff - 1).clamp(1, currentStreak);
           currentStreak = (currentStreak - lostLeaves).clamp(0, 999);
-          message =
-              '🍂 Your tree missed you for $diff days. $lostLeaves leaf fell. Keep coming back 💚';
+          message = '🍂 Your tree missed you for $diff days. $lostLeaves leaf fell. Keep coming back 💚';
         }
-
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(_uid)
-            .update({
+        await FirebaseFirestore.instance.collection('users').doc(_uid).update({
           'streak': currentStreak,
           'last_open_date': today,
         });
@@ -579,7 +468,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     setState(() => _streak = currentStreak);
-
     if (message.isNotEmpty) {
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted) _showTreeMessage(context, message);
@@ -600,8 +488,7 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       barrierDismissible: true,
       builder: (_) => Dialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -611,20 +498,15 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 16),
               Text(message,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 16,
-                      color: Color(0xFF2D2D2D),
-                      height: 1.5)),
+                  style: const TextStyle(fontSize: 16, color: Color(0xFF2D2D2D), height: 1.5)),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF7C6FF7),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                child: const Text('Thanks 💚',
-                    style: TextStyle(color: Colors.white)),
+                child: const Text('Thanks 💚', style: TextStyle(color: Colors.white)),
               ),
             ],
           ),
@@ -649,15 +531,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Good morning 🌸',
-                          style:
-                              TextStyle(fontSize: 14, color: Colors.grey)),
+                      const Text('Good morning 🌸', style: TextStyle(fontSize: 14, color: Colors.grey)),
                       const SizedBox(height: 4),
                       Text(widget.username,
-                          style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF2D2D2D))),
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2D2D2D))),
                     ],
                   ),
                   const CircleAvatar(
@@ -671,10 +548,7 @@ class _HomeScreenState extends State<HomeScreen> {
               GrowingTree(streak: _streak),
               const SizedBox(height: 24),
               const Text('How are you feeling?',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF2D2D2D))),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF2D2D2D))),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -684,31 +558,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () => setState(() => selectedMood = i),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 200),
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 12, horizontal: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                       decoration: BoxDecoration(
-                        color: selected
-                            ? const Color(0xFF7C6FF7)
-                            : Colors.white,
+                        color: selected ? const Color(0xFF7C6FF7) : Colors.white,
                         borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                              color: Colors.black.withOpacity(0.06),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2))
-                        ],
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8, offset: const Offset(0, 2))],
                       ),
                       child: Column(
                         children: [
-                          Text(moods[i]['emoji']!,
-                              style: const TextStyle(fontSize: 28)),
+                          Text(moods[i]['emoji']!, style: const TextStyle(fontSize: 28)),
                           const SizedBox(height: 6),
                           Text(moods[i]['label']!,
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  color: selected
-                                      ? Colors.white
-                                      : Colors.grey)),
+                              style: TextStyle(fontSize: 11, color: selected ? Colors.white : Colors.grey)),
                         ],
                       ),
                     ),
@@ -717,69 +578,73 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 24),
               const Text('What do you need?',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF2D2D2D))),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF2D2D2D))),
               const SizedBox(height: 16),
               Row(
                 children: [
                   _ActionCard(
-                    icon: Icons.book_outlined,
-                    label: 'Journal',
-                    color: const Color(0xFFFFE5F0),
-                    iconColor: const Color(0xFFFF6B9D),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => JournalScreen(uid: _uid))),
+                    icon: Icons.book_outlined, label: 'Journal',
+                    color: const Color(0xFFFFE5F0), iconColor: const Color(0xFFFF6B9D),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => JournalScreen(uid: _uid))),
                   ),
                   const SizedBox(width: 12),
                   _ActionCard(
-                    icon: Icons.chat_bubble_outline,
-                    label: 'Chat',
-                    color: const Color(0xFFE5F0FF),
-                    iconColor: const Color(0xFF6B9DFF),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const ChatScreen())),
+                    icon: Icons.chat_bubble_outline, label: 'Chat',
+                    color: const Color(0xFFE5F0FF), iconColor: const Color(0xFF6B9DFF),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatScreen())),
                   ),
                   const SizedBox(width: 12),
                   _ActionCard(
-                    icon: Icons.air_outlined,
-                    label: 'Breathe',
-                    color: const Color(0xFFE5FFE5),
-                    iconColor: const Color(0xFF4CAF50),
-                    onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const BreatheScreen())),
+                    icon: Icons.air_outlined, label: 'Breathe',
+                    color: const Color(0xFFE5FFE5), iconColor: const Color(0xFF4CAF50),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BreatheScreen())),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              GestureDetector(
+                onTap: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => UnsentLettersScreen(uid: _uid))),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3E5FF),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: const [
+                      Text('✉️', style: TextStyle(fontSize: 28)),
+                      SizedBox(width: 16),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Unsent Letters',
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF7C6FF7))),
+                          Text('Say what you couldn\'t say',
+                              style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 16),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                      colors: [Color(0xFF7C6FF7), Color(0xFF9B8FF9)]),
+                  gradient: const LinearGradient(colors: [Color(0xFF7C6FF7), Color(0xFF9B8FF9)]),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
-                    Text('💬 Daily Reminder',
-                        style: TextStyle(
-                            color: Colors.white70, fontSize: 13)),
+                    Text('💬 Daily Reminder', style: TextStyle(color: Colors.white70, fontSize: 13)),
                     SizedBox(height: 8),
                     Text(
                       '"You are not alone. Whatever you\'re feeling right now — it\'s okay. This is your safe space."',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          height: 1.5),
+                      style: TextStyle(color: Colors.white, fontSize: 14, height: 1.5),
                     ),
                   ],
                 ),
@@ -799,13 +664,7 @@ class _ActionCard extends StatelessWidget {
   final Color iconColor;
   final VoidCallback onTap;
 
-  const _ActionCard({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.iconColor,
-    required this.onTap,
-  });
+  const _ActionCard({required this.icon, required this.label, required this.color, required this.iconColor, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -814,18 +673,13 @@ class _ActionCard extends StatelessWidget {
         onTap: onTap,
         child: Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-              color: color, borderRadius: BorderRadius.circular(20)),
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(icon, color: iconColor, size: 28),
               const SizedBox(height: 10),
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: iconColor)),
+              Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: iconColor)),
             ],
           ),
         ),
@@ -844,15 +698,34 @@ class JournalScreen extends StatefulWidget {
 
 class _JournalScreenState extends State<JournalScreen> {
   final TextEditingController _controller = TextEditingController();
-  final List<Map<String, String>> _entries = [];
+  List<Map<String, dynamic>> _entries = [];
+  bool _loading = true;
 
-  void _saveEntry() {
-    if (_controller.text.trim().isEmpty) return;
+  @override
+  void initState() {
+    super.initState();
+    _loadEntries();
+  }
+
+  Future<void> _loadEntries() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users').doc(widget.uid).collection('journals')
+        .orderBy('created_at', descending: true).get();
     setState(() {
-      _entries.insert(0, {
-        'text': _controller.text.trim(),
-        'date': DateTime.now().toString().substring(0, 16),
-      });
+      _entries = snapshot.docs.map((doc) => {'text': doc['text'], 'date': doc['created_at']}).toList();
+      _loading = false;
+    });
+  }
+
+  Future<void> _saveEntry() async {
+    if (_controller.text.trim().isEmpty) return;
+    final text = _controller.text.trim();
+    final now = DateTime.now().toIso8601String();
+    await FirebaseFirestore.instance
+        .collection('users').doc(widget.uid).collection('journals')
+        .add({'text': text, 'created_at': now});
+    setState(() {
+      _entries.insert(0, {'text': text, 'date': now});
       _controller.clear();
     });
   }
@@ -863,9 +736,7 @@ class _JournalScreenState extends State<JournalScreen> {
       backgroundColor: const Color(0xFFF5F0FF),
       appBar: AppBar(
         backgroundColor: const Color(0xFF7C6FF7),
-        title: const Text('My Journal',
-            style: TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text('My Journal', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
       ),
@@ -879,28 +750,19 @@ class _JournalScreenState extends State<JournalScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2))
-                ],
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2))],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Write your thoughts...',
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF7C6FF7))),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF7C6FF7))),
                   const SizedBox(height: 10),
                   TextField(
                     controller: _controller,
                     maxLines: 5,
                     decoration: const InputDecoration(
-                      hintText:
-                          'What\'s on your mind? Express freely...',
+                      hintText: 'What\'s on your mind? Express freely...',
                       border: InputBorder.none,
                       hintStyle: TextStyle(color: Colors.grey),
                     ),
@@ -910,14 +772,11 @@ class _JournalScreenState extends State<JournalScreen> {
                     alignment: Alignment.centerRight,
                     child: ElevatedButton.icon(
                       onPressed: _saveEntry,
-                      icon: const Icon(Icons.save_outlined,
-                          size: 18, color: Colors.white),
-                      label: const Text('Save',
-                          style: TextStyle(color: Colors.white)),
+                      icon: const Icon(Icons.save_outlined, size: 18, color: Colors.white),
+                      label: const Text('Save', style: TextStyle(color: Colors.white)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF7C6FF7),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                     ),
                   ),
@@ -925,63 +784,274 @@ class _JournalScreenState extends State<JournalScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            const Text('Past Entries',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF2D2D2D))),
+            const Text('Past Entries', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF2D2D2D))),
             const SizedBox(height: 12),
             Expanded(
-              child: _entries.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.book_outlined,
-                              size: 48, color: Colors.grey),
-                          SizedBox(height: 12),
-                          Text('No entries yet.\nStart writing!',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  color: Colors.grey, fontSize: 14)),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: _entries.length,
-                      itemBuilder: (context, i) {
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                  color:
-                                      Colors.black.withOpacity(0.04),
-                                  blurRadius: 8)
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator(color: Color(0xFF7C6FF7)))
+                  : _entries.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Icon(Icons.book_outlined, size: 48, color: Colors.grey),
+                              SizedBox(height: 12),
+                              Text('No entries yet.\nStart writing!',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: Colors.grey, fontSize: 14)),
                             ],
                           ),
-                          child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              Text(_entries[i]['date']!,
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey)),
-                              const SizedBox(height: 6),
-                              Text(_entries[i]['text']!,
-                                  style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Color(0xFF2D2D2D),
-                                      height: 1.5)),
-                            ],
+                        )
+                      : ListView.builder(
+                          itemCount: _entries.length,
+                          itemBuilder: (context, i) {
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(_entries[i]['date'].toString().substring(0, 16),
+                                      style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                  const SizedBox(height: 6),
+                                  Text(_entries[i]['text'],
+                                      style: const TextStyle(fontSize: 14, color: Color(0xFF2D2D2D), height: 1.5)),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── UNSENT LETTERS ──
+class UnsentLettersScreen extends StatefulWidget {
+  final String uid;
+  const UnsentLettersScreen({super.key, required this.uid});
+  @override
+  State<UnsentLettersScreen> createState() => _UnsentLettersScreenState();
+}
+
+class _UnsentLettersScreenState extends State<UnsentLettersScreen> {
+  final TextEditingController _toController = TextEditingController();
+  final TextEditingController _letterController = TextEditingController();
+  List<Map<String, dynamic>> _letters = [];
+  bool _loading = true;
+  bool _writing = false;
+
+  final List<String> _suggestions = [
+    'Mom', 'Dad', 'My best friend', 'My crush',
+    'My professor', 'My past self', 'My future self', 'Society',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLetters();
+  }
+
+  Future<void> _loadLetters() async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('users').doc(widget.uid).collection('unsent_letters')
+        .orderBy('created_at', descending: true).get();
+    setState(() {
+      _letters = snapshot.docs.map((doc) => {'to': doc['to'], 'text': doc['text'], 'date': doc['created_at']}).toList();
+      _loading = false;
+    });
+  }
+
+  Future<void> _saveLetter() async {
+    if (_letterController.text.trim().isEmpty || _toController.text.trim().isEmpty) return;
+    final to = _toController.text.trim();
+    final text = _letterController.text.trim();
+    final now = DateTime.now().toIso8601String();
+    await FirebaseFirestore.instance
+        .collection('users').doc(widget.uid).collection('unsent_letters')
+        .add({'to': to, 'text': text, 'created_at': now});
+    setState(() {
+      _letters.insert(0, {'to': to, 'text': text, 'date': now});
+      _toController.clear();
+      _letterController.clear();
+      _writing = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F0FF),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF7C6FF7),
+        title: const Text('Unsent Letters', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        iconTheme: const IconThemeData(color: Colors.white),
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit, color: Colors.white),
+            onPressed: () => setState(() => _writing = !_writing),
+          )
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF7C6FF7), Color(0xFF9B8FF9)]),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Text(
+                '✉️ Say everything you couldn\'t say.\nThese letters will never be sent — this is just for you.',
+                style: TextStyle(color: Colors.white, fontSize: 13, height: 1.5),
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (_writing) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('To:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF7C6FF7))),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _toController,
+                      decoration: InputDecoration(
+                        hintText: 'Who is this letter for?',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        filled: true,
+                        fillColor: const Color(0xFFF5F0FF),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: _suggestions.map((s) {
+                        return GestureDetector(
+                          onTap: () => setState(() => _toController.text = s),
+                          child: Chip(
+                            label: Text(s, style: const TextStyle(fontSize: 12)),
+                            backgroundColor: const Color(0xFFEDE7FF),
+                            labelStyle: const TextStyle(color: Color(0xFF7C6FF7)),
+                            padding: EdgeInsets.zero,
                           ),
                         );
-                      },
+                      }).toList(),
                     ),
+                    const SizedBox(height: 12),
+                    const Text('Your letter:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF7C6FF7))),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _letterController,
+                      maxLines: 6,
+                      decoration: InputDecoration(
+                        hintText: 'Write everything you\'ve wanted to say...',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        filled: true,
+                        fillColor: const Color(0xFFF5F0FF),
+                        contentPadding: const EdgeInsets.all(16),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => setState(() => _writing = false),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Color(0xFF7C6FF7)),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('Cancel', style: TextStyle(color: Color(0xFF7C6FF7))),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _saveLetter,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF7C6FF7),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: const Text('Save Letter', style: TextStyle(color: Colors.white)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+            const Text('Your Letters', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF2D2D2D))),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator(color: Color(0xFF7C6FF7)))
+                  : _letters.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Text('✉️', style: TextStyle(fontSize: 48)),
+                              SizedBox(height: 12),
+                              Text('No letters yet.\nTap the ✏️ to write your first one.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: Colors.grey, fontSize: 14, height: 1.5)),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: _letters.length,
+                          itemBuilder: (context, i) {
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8)],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text('To: ${_letters[i]['to']}',
+                                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF7C6FF7))),
+                                      Text(_letters[i]['date'].toString().substring(0, 10),
+                                          style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(_letters[i]['text'],
+                                      style: const TextStyle(fontSize: 14, color: Color(0xFF2D2D2D), height: 1.5)),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
             ),
           ],
         ),
@@ -997,8 +1067,7 @@ class BreatheScreen extends StatefulWidget {
   State<BreatheScreen> createState() => _BreatheScreenState();
 }
 
-class _BreatheScreenState extends State<BreatheScreen>
-    with SingleTickerProviderStateMixin {
+class _BreatheScreenState extends State<BreatheScreen> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
   String _phase = 'Breathe In';
@@ -1007,8 +1076,7 @@ class _BreatheScreenState extends State<BreatheScreen>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(seconds: 4));
+    _controller = AnimationController(vsync: this, duration: const Duration(seconds: 4));
     _animation = Tween<double>(begin: 0.6, end: 1.0).animate(
         CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
     _controller.addStatusListener((status) {
@@ -1030,11 +1098,8 @@ class _BreatheScreenState extends State<BreatheScreen>
 
   void _toggle() {
     setState(() => _running = !_running);
-    if (_running) {
-      _controller.forward();
-    } else {
-      _controller.stop();
-    }
+    if (_running) _controller.forward();
+    else _controller.stop();
   }
 
   @override
@@ -1043,9 +1108,7 @@ class _BreatheScreenState extends State<BreatheScreen>
       backgroundColor: const Color(0xFF1A1A2E),
       appBar: AppBar(
         backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('Breathe',
-            style: TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text('Breathe', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
       ),
@@ -1053,8 +1116,7 @@ class _BreatheScreenState extends State<BreatheScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('Take a moment for yourself',
-                style: TextStyle(color: Colors.white54, fontSize: 14)),
+            const Text('Take a moment for yourself', style: TextStyle(color: Colors.white54, fontSize: 14)),
             const SizedBox(height: 60),
             AnimatedBuilder(
               animation: _animation,
@@ -1062,20 +1124,14 @@ class _BreatheScreenState extends State<BreatheScreen>
                 return Transform.scale(
                   scale: _animation.value,
                   child: Container(
-                    width: 200,
-                    height: 200,
+                    width: 200, height: 200,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: const Color(0xFF7C6FF7).withOpacity(0.3),
-                      border: Border.all(
-                          color: const Color(0xFF7C6FF7), width: 2),
+                      border: Border.all(color: const Color(0xFF7C6FF7), width: 2),
                     ),
                     child: Center(
-                      child: Text(_phase,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w300)),
+                      child: Text(_phase, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w300)),
                     ),
                   ),
                 );
@@ -1085,26 +1141,16 @@ class _BreatheScreenState extends State<BreatheScreen>
             GestureDetector(
               onTap: _toggle,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 40, vertical: 16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF7C6FF7),
-                  borderRadius: BorderRadius.circular(30),
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+                decoration: BoxDecoration(color: const Color(0xFF7C6FF7), borderRadius: BorderRadius.circular(30)),
                 child: Text(_running ? 'Pause' : 'Start',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600)),
+                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
               ),
             ),
             const SizedBox(height: 24),
-            const Text(
-              '4 seconds in • 4 seconds out\nRepeat as many times as you need',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: Colors.white38, fontSize: 13, height: 1.6),
-            ),
+            const Text('4 seconds in • 4 seconds out\nRepeat as many times as you need',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white38, fontSize: 13, height: 1.6)),
           ],
         ),
       ),
@@ -1130,20 +1176,17 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _messages.add({
       'role': 'bot',
-      'text':
-          'Hey 👋 I\'m here for you. This is a safe space — no judgment, no advice unless you ask. What\'s on your mind?',
+      'text': 'Hey 👋 I\'m here for you. This is a safe space — no judgment, no advice unless you ask. What\'s on your mind?',
     });
   }
 
   Future<void> _sendMessage(String text) async {
     if (text.trim().isEmpty) return;
     _controller.clear();
-
     setState(() {
       _messages.add({'role': 'user', 'text': text});
       _isTyping = true;
     });
-
     _scrollToBottom();
 
     if (detectCrisis(text)) {
@@ -1161,28 +1204,23 @@ class _ChatScreenState extends State<ChatScreen> {
         Uri.parse(geminiUrl),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {
-                  'text':
-                      '''You are MindMend, a compassionate emotional support companion for Indian college students. 
+          'contents': [{
+            'parts': [{
+              'text': '''You are MindMend, a compassionate emotional support companion for Indian college students.
 Your role is to listen, validate feelings, and respond with empathy — never judgment.
-Never give medical advice. Never dismiss feelings. 
+Never give medical advice. Never dismiss feelings.
+Respond differently to each message — never repeat the same response.
+If someone seems stressed about parents, exams, or relationships — acknowledge that specifically.
 Keep responses short, warm, and human. Max 3-4 sentences.
 The user says: $text'''
-                }
-              ]
-            }
-          ]
+            }]
+          }]
         }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final reply =
-            data['candidates'][0]['content']['parts'][0]['text'] ??
-                'I\'m here with you. Take your time.';
+        final reply = data['candidates'][0]['content']['parts'][0]['text'] ?? 'I\'m here with you. Take your time.';
         setState(() {
           _isTyping = false;
           _messages.add({'role': 'bot', 'text': reply});
@@ -1190,34 +1228,23 @@ The user says: $text'''
       } else {
         setState(() {
           _isTyping = false;
-          _messages.add({
-            'role': 'bot',
-            'text':
-                'I\'m here with you. Take your time — what\'s going on?'
-          });
+          _messages.add({'role': 'bot', 'text': 'I\'m here with you. Take your time — what\'s going on?'});
         });
       }
     } catch (e) {
       setState(() {
         _isTyping = false;
-        _messages.add({
-          'role': 'bot',
-          'text': 'I\'m here. Tell me more about what you\'re feeling.'
-        });
+        _messages.add({'role': 'bot', 'text': 'I\'m here. Tell me more about what you\'re feeling.'});
       });
     }
-
     _scrollToBottom();
   }
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 300), () {
       if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
   }
@@ -1231,13 +1258,8 @@ The user says: $text'''
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('MindMend',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
-            Text('Always here for you',
-                style: TextStyle(color: Colors.white70, fontSize: 12)),
+            Text('MindMend', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+            Text('Always here for you', style: TextStyle(color: Colors.white70, fontSize: 12)),
           ],
         ),
         iconTheme: const IconThemeData(color: Colors.white),
@@ -1251,16 +1273,10 @@ The user says: $text'''
               padding: const EdgeInsets.all(16),
               itemCount: _messages.length + (_isTyping ? 1 : 0),
               itemBuilder: (context, i) {
-                if (_isTyping && i == _messages.length) {
-                  return _TypingIndicator();
-                }
+                if (_isTyping && i == _messages.length) return _TypingIndicator();
                 final msg = _messages[i];
-                if (msg['role'] == 'crisis') {
-                  return _CrisisCard();
-                }
-                final isUser = msg['role'] == 'user';
-                return _MessageBubble(
-                    text: msg['text']!, isUser: isUser);
+                if (msg['role'] == 'crisis') return _CrisisCard();
+                return _MessageBubble(text: msg['text']!, isUser: msg['role'] == 'user');
               },
             ),
           ),
@@ -1282,33 +1298,17 @@ class _MessageBubble extends StatelessWidget {
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.75),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
         decoration: BoxDecoration(
-          color:
-              isUser ? const Color(0xFF7C6FF7) : Colors.white,
+          color: isUser ? const Color(0xFF7C6FF7) : Colors.white,
           borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(isUser ? 18 : 4),
-            bottomRight: Radius.circular(isUser ? 4 : 18),
+            topLeft: const Radius.circular(18), topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(isUser ? 18 : 4), bottomRight: Radius.circular(isUser ? 4 : 18),
           ),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 8,
-                offset: const Offset(0, 2))
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8, offset: const Offset(0, 2))],
         ),
-        child: Text(text,
-            style: TextStyle(
-                fontSize: 14,
-                color: isUser
-                    ? Colors.white
-                    : const Color(0xFF2D2D2D),
-                height: 1.5)),
+        child: Text(text, style: TextStyle(fontSize: 14, color: isUser ? Colors.white : const Color(0xFF2D2D2D), height: 1.5)),
       ),
     );
   }
@@ -1323,34 +1323,26 @@ class _CrisisCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFFFE5E5),
         borderRadius: BorderRadius.circular(16),
-        border:
-            Border.all(color: const Color(0xFFFF6B6B), width: 1),
+        border: Border.all(color: const Color(0xFFFF6B6B), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'I hear you. What you\'re feeling right now is real and it matters. You don\'t have to face this alone.\n\nPlease reach out to a real person right now 💙',
-            style: TextStyle(
-                fontSize: 14,
-                color: Color(0xFF2D2D2D),
-                height: 1.5),
+            style: TextStyle(fontSize: 14, color: Color(0xFF2D2D2D), height: 1.5),
           ),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
               onPressed: () {},
-              icon: const Icon(Icons.phone,
-                  color: Colors.white, size: 18),
+              icon: const Icon(Icons.phone, color: Colors.white, size: 18),
               label: const Text('Call iCall — 9152987821',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold)),
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFFF6B6B),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ),
@@ -1367,19 +1359,13 @@ class _TypingIndicator extends StatelessWidget {
       alignment: Alignment.centerLeft,
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 8)
-          ],
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)],
         ),
-        child: const Text('typing...',
-            style: TextStyle(color: Colors.grey, fontSize: 13)),
+        child: const Text('typing...', style: TextStyle(color: Colors.grey, fontSize: 13)),
       ),
     );
   }
@@ -1393,16 +1379,10 @@ class _InputBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -2))
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))],
       ),
       child: Row(
         children: [
@@ -1410,17 +1390,12 @@ class _InputBar extends StatelessWidget {
             child: TextField(
               controller: controller,
               decoration: InputDecoration(
-                hintText:
-                    'Say anything — this is your safe space...',
-                hintStyle: const TextStyle(
-                    color: Colors.grey, fontSize: 13),
+                hintText: 'Say anything — this is your safe space...',
+                hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
                 filled: true,
                 fillColor: const Color(0xFFF5F0FF),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
               onSubmitted: onSend,
             ),
@@ -1429,14 +1404,9 @@ class _InputBar extends StatelessWidget {
           GestureDetector(
             onTap: () => onSend(controller.text),
             child: Container(
-              width: 48,
-              height: 48,
-              decoration: const BoxDecoration(
-                color: Color(0xFF7C6FF7),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.send_rounded,
-                  color: Colors.white, size: 20),
+              width: 48, height: 48,
+              decoration: const BoxDecoration(color: Color(0xFF7C6FF7), shape: BoxShape.circle),
+              child: const Icon(Icons.send_rounded, color: Colors.white, size: 20),
             ),
           ),
         ],
